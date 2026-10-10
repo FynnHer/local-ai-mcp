@@ -1,0 +1,288 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Local AI Stats</title>
+<style>
+  :root {
+    --bg: #f6f7f9; --panel: #fff; --text: #16181d; --muted: #646b78; --line: #e3e6eb; --code: #f1f3f6;
+    --accent: #2f6fde; --ok: #1f8a4c; --bad: #c8372d; --warn: #b7791f;
+    color-scheme: light;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root { --bg: #111317; --panel: #1a1d23; --text: #e8eaee; --muted: #959cab; --line: #2b2f37; --code: #14161b;
+            --accent: #6d9cf0; --ok: #4cc283; --bad: #ee6a60; --warn: #e0a84a; color-scheme: dark; }
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--text);
+         font: 14px/1.45 -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
+  main { max-width: 1100px; margin: 0 auto; padding: 24px 16px 48px; }
+  header { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
+  h1 { font-size: 20px; margin: 0; }
+  h2 { font-size: 13px; text-transform: uppercase; letter-spacing: .06em; color: var(--muted); margin: 28px 0 10px; }
+  .status { color: var(--muted); font-size: 13px; }
+  .dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; margin-right: 6px; background: var(--bad); }
+  .dot.up { background: var(--ok); }
+  .tiles { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 10px; margin-top: 18px; }
+  .tile { background: var(--panel); border: 1px solid var(--line); border-radius: 8px; padding: 12px 14px; }
+  .tile b { display: block; font-size: 22px; font-variant-numeric: tabular-nums; }
+  .tile span { color: var(--muted); font-size: 12px; }
+  .panel { background: var(--panel); border: 1px solid var(--line); border-radius: 8px; overflow-x: auto; }
+  table { width: 100%; border-collapse: collapse; }
+  th, td { text-align: left; padding: 8px 12px; border-bottom: 1px solid var(--line); white-space: nowrap; }
+  th { color: var(--muted); font-weight: 500; font-size: 12px; }
+  td.num, th.num { text-align: right; font-variant-numeric: tabular-nums; }
+  td.note { white-space: normal; min-width: 240px; color: var(--muted); }
+  tr:last-child td { border-bottom: 0; }
+  tr.clickable { cursor: pointer; }
+  tr.clickable:hover td { background: var(--code); }
+  tr.detail td { white-space: normal; background: var(--code); }
+  .err { color: var(--bad); }
+  .empty { padding: 14px; color: var(--muted); }
+  pre { margin: 0; padding: 10px 12px; background: var(--code); border: 1px solid var(--line); border-radius: 6px;
+        font: 12px/1.5 ui-monospace, SFMono-Regular, Menlo, monospace; white-space: pre-wrap; word-break: break-word;
+        max-height: 360px; overflow: auto; }
+  .label { font-size: 12px; color: var(--muted); margin: 10px 0 4px; }
+  /* live runs */
+  .run.queued { border-left-color: var(--line); }
+  .run.queued .pulse { animation: none; background: var(--muted); }
+  .run.stalled { border-color: var(--bad); border-left-color: var(--bad); }
+  .run.stalled .pulse { background: var(--bad); }
+  .stall { margin-top: 10px; padding: 8px 10px; border-radius: 6px; color: var(--bad);
+           background: color-mix(in srgb, var(--bad) 10%, transparent); font-size: 13px; }
+  .run { background: var(--panel); border: 1px solid var(--line); border-left: 3px solid var(--warn);
+         border-radius: 8px; padding: 12px 14px; margin-bottom: 10px; }
+  .run-head { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+  .run-meta { color: var(--muted); font-variant-numeric: tabular-nums; }
+  .phase { font-size: 12px; padding: 2px 8px; border-radius: 10px; background: var(--code); border: 1px solid var(--line); font-variant-numeric: tabular-nums; }
+  .phase:empty { display: none; }
+  .pulse { width: 8px; height: 8px; border-radius: 50%; background: var(--warn); animation: pulse 1.2s infinite; }
+  @keyframes pulse { 50% { opacity: .25; } }
+  @media (prefers-reduced-motion: reduce) { .pulse { animation: none; } }
+  details summary { cursor: pointer; font-size: 12px; color: var(--muted); margin: 10px 0 4px; }
+  form { display: flex; gap: 8px; flex-wrap: wrap; padding: 12px; border-top: 1px solid var(--line); }
+  input, select, button { font: inherit; padding: 6px 10px; border-radius: 6px; border: 1px solid var(--line);
+                          background: var(--bg); color: var(--text); }
+  input[name=note] { flex: 1; min-width: 160px; }
+  button { cursor: pointer; }
+  button.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
+  button.link { border: 0; background: none; color: var(--accent); padding: 2px 6px; }
+  button.link.danger { color: var(--bad); }
+  button.stop { margin-left: auto; padding: 3px 10px; font-size: 12px; color: var(--bad); border-color: var(--bad); background: none; }
+  button:disabled { opacity: .6; cursor: default; }
+  #msg { padding: 0 12px 12px; color: var(--bad); }
+  #msg:empty { display: none; }
+</style>
+</head>
+<body>
+<main>
+  <header>
+    <h1>Local AI</h1>
+    <div class="status"><span id="dot" class="dot"></span><span id="status">connecting…</span></div>
+  </header>
+
+  <div class="tiles" id="tiles"></div>
+
+  <section id="live-section" hidden>
+    <h2>Live</h2>
+    <div id="live"></div>
+  </section>
+
+  <h2>Recent calls</h2>
+  <div class="panel"><table>
+    <thead><tr><th>When</th><th>Tool</th><th>Model</th><th class="num">Input</th><th class="num">Cached</th><th class="num">Output</th>
+      <th class="num">tok/s</th><th class="num">Time</th><th>Task (click to expand)</th></tr></thead>
+    <tbody id="recent"></tbody></table></div>
+
+  <h2>Usage by model</h2>
+  <div class="panel"><table>
+    <thead><tr><th>Model</th><th>Tool</th><th class="num">Calls</th><th class="num">Errors</th>
+      <th class="num">Input tok</th><th class="num">Cached tok</th><th class="num">Output tok</th><th class="num">tok/s</th><th class="num">Avg time</th></tr></thead>
+    <tbody id="per-model"></tbody></table></div>
+
+  <h2>Models</h2>
+  <div class="panel">
+    <table><thead><tr><th>Alias</th><th>Ollama model</th><th>Note</th><th>State</th><th></th></tr></thead>
+      <tbody id="registry"></tbody></table>
+    <form id="add">
+      <input name="alias" placeholder="alias, e.g. coder" required pattern="[a-z0-9][a-z0-9_\-]{0,31}">
+      <select name="model" id="installed" required></select>
+      <input name="note" placeholder="note shown to Claude, e.g. fast, good at code">
+      <button class="primary">Add model</button>
+    </form>
+    <div id="msg"></div>
+  </div>
+</main>
+
+<script>
+const $ = id => document.getElementById(id);
+const esc = s => String(s ?? "").replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
+const n = v => Math.round(v || 0).toLocaleString();
+const dur = ms => !ms ? "–" : ms < 1000 ? `${Math.round(ms)} ms` : ms < 60000 ? `${(ms / 1000).toFixed(1)} s`
+  : `${Math.floor(ms / 60000)}m ${String(Math.floor(ms / 1000) % 60).padStart(2, "0")}s`;
+const tps = v => v ? v.toFixed(1) : "–";
+const ago = ts => { const s = Date.now() / 1000 - ts;
+  return s < 60 ? "just now" : s < 3600 ? `${Math.floor(s / 60)} min ago` : s < 86400 ? `${Math.floor(s / 3600)} h ago` : new Date(ts * 1000).toLocaleString(); };
+const rows = (el, list, cols, emptyText) => { $(el).innerHTML = list.length
+  ? list.map(cols).join("") : `<tr><td class="empty" colspan="10">${emptyText}</td></tr>`; };
+
+const openRuns = new Set(), detailCache = {}, busy = new Map();
+
+async function post(path, body) {
+  const r = await fetch(path, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body || {}) });
+  const data = await r.json();
+  $("msg").textContent = r.ok ? "" : data.error;
+  refresh();
+}
+
+// Live cards are updated in place so scroll position and open/closed prompts survive each refresh.
+function renderLive(running, now, gpu) {
+  $("live-section").hidden = !running.length;
+  const ids = new Set(running.map(r => `run-${r.id}`));
+  for (const el of [...$("live").children]) if (!ids.has(el.id)) el.remove();
+  for (const r of running) {
+    let card = $(`run-${r.id}`);
+    if (!card) {
+      card = document.createElement("div");
+      card.className = "run"; card.id = `run-${r.id}`;
+      card.innerHTML = `<div class="run-head"><span class="pulse"></span><b>${esc(r.tool)}</b><span>${esc(r.model)}</span>
+          <span class="run-meta"></span><span class="phase"></span><button class="stop danger" data-cancel="${r.id}">■ Stop</button></div>
+        <div class="stall" hidden></div>
+        <details open><summary>Prompt (${n(r.prompt_len)} chars)</summary><pre class="prompt"></pre></details>
+        <div class="label">Output</div><pre class="out"></pre>`;
+      card.querySelector(".prompt").textContent = r.prompt + (r.prompt_len > r.prompt.length ? "\n…(truncated)" : "");
+      $("live").append(card);
+    }
+    const toks = [r.prompt_tokens && `in ${n(r.prompt_tokens)}${r.cached_tokens ? ` (${n(r.cached_tokens)} cached)` : ""}`,
+      r.gen_tokens && `out ${n(r.gen_tokens)}`,
+      r.tool === "ask" && r.gen_ms && `${tps(r.gen_tokens * 1000 / r.gen_ms)} tok/s`].filter(Boolean).join(" · ");
+    card.querySelector(".run-meta").textContent = `· ${dur((now - r.ts) * 1000)}${toks ? " · " + toks : ""}`;
+    card.querySelector(".phase").textContent = r.phase ? `${r.phase} · ${dur((now - r.phase_ts) * 1000)}` : "";
+    if (r.cancel) { const b = card.querySelector(".stop"); b.disabled = true; b.textContent = "stopping…"; }
+    // Queued: waiting for another call to finish. Stalled: running, but nothing visible for a minute;
+    // a looping model can generate for many minutes without streaming anything (see #33).
+    const queued = r.phase === "queued", silent = now - (r.last_out || r.ts), stalled = !queued && silent > 60;
+    card.classList.toggle("queued", queued);
+    card.classList.toggle("stalled", stalled);
+    if (queued) card.querySelector(".phase").textContent = `queued · position ${r.queue_pos} · waiting ${dur((now - r.phase_ts) * 1000)}`;
+    const warn = card.querySelector(".stall");
+    warn.hidden = !stalled;
+    if (stalled) warn.textContent = (r.phase.includes("reading prompt")
+      ? `Still reading the prompt after ${dur(silent * 1000)}. Fine for a huge prompt, otherwise something is wrong.`
+      : gpu >= 50
+        ? `No visible output for ${dur(silent * 1000)}, but the GPU is at ${gpu}%: the model is generating `
+          + `without showing it, probably looping inside a tool call. Stop it.`
+        : `No visible output for ${dur(silent * 1000)}${gpu != null ? ` and the GPU is idle (${gpu}%)` : ""}: `
+          + `it's waiting on something else (a tool or the claude process). Stop it if this keeps growing.`);
+    const out = card.querySelector(".out"), atBottom = out.scrollHeight - out.scrollTop - out.clientHeight < 30;
+    const text = r.live || (queued ? "waiting for the model…" : r.tool === "ask" ? "reading prompt…" : "starting…");
+    if (out.textContent !== text) { out.textContent = text; if (atBottom) out.scrollTop = out.scrollHeight; }
+  }
+}
+
+function renderRecent(recent) {
+  rows("recent", recent, r => {
+    const bad = r.status !== "ok";
+    let html = `<tr class="clickable" data-run="${r.id}"><td>${ago(r.ts)}</td><td>${esc(r.tool)}</td><td>${esc(r.model)}</td>
+      <td class="num">${n(r.prompt_tokens)}</td><td class="num">${n(r.cached_tokens)}</td><td class="num">${n(r.gen_tokens)}</td>
+      <td class="num">${tps(r.tps)}</td><td class="num">${dur(r.total_ms)}</td><td class="note ${bad ? "err" : ""}">${bad ? `[${esc(r.status)}] ` : ""}${esc(r.note)}</td></tr>`;
+    if (openRuns.has(r.id)) {
+      const d = detailCache[r.id];
+      html += `<tr class="detail"><td colspan="9">${d
+        ? `<div class="label">Prompt</div><pre>${esc(d.prompt)}</pre><div class="label">Output</div><pre>${esc(d.live) || "(empty)"}</pre>`
+        : "loading…"}</td></tr>`;
+    }
+    return html;
+  }, "No calls yet.");
+}
+
+let lastRecent = [];
+$("recent").addEventListener("click", async e => {
+  const tr = e.target.closest("tr[data-run]");
+  if (!tr) return;
+  const id = Number(tr.dataset.run);
+  if (openRuns.delete(id)) return renderRecent(lastRecent);
+  openRuns.add(id);
+  renderRecent(lastRecent);
+  detailCache[id] ??= await (await fetch(`/api/runs/${id}`)).json();
+  renderRecent(lastRecent);
+});
+
+async function refresh() {
+  let d;
+  try { d = await (await fetch("/api/stats")).json(); }
+  catch { $("status").textContent = "dashboard server unreachable"; $("dot").className = "dot"; return 5000; }
+
+  $("dot").className = "dot" + (d.ollama_up ? " up" : "");
+  $("status").textContent = d.ollama_up
+    ? [`Ollama up · ${d.loaded.length} model(s) in memory`, `${d.running.length - d.queued} running`,
+       d.queued && `${d.queued} queued`, d.gpu != null && `GPU ${d.gpu}%`].filter(Boolean).join(" · ")
+    : "Ollama not reachable";
+
+  const s = d.summary;
+  $("tiles").innerHTML = [
+    [n(s.total_tokens), "total tokens"], [n(s.prompt_tokens), "input tokens"], [n(s.gen_tokens), "output tokens"],
+    [n(s.cached_tokens), `cached tokens · ${s.prompt_tokens ? Math.round(s.cached_tokens / s.prompt_tokens * 100) : 0}% of input`],
+    [n(s.calls), "calls total"], [n(s.calls_24h), "calls, last 24 h"], [tps(s.tps), "avg output tok/s"],
+    [dur(s.total_ms), "total run time"], [n(s.errors), "errors"],
+  ].map(([v, l]) => `<div class="tile"><b>${v}</b><span>${l}</span></div>`).join("");
+
+  renderLive(d.running, d.now, d.gpu);
+  lastRecent = d.recent;
+  renderRecent(d.recent);
+
+  rows("per-model", d.per_model, r => `<tr><td>${esc(r.model)}</td><td>${esc(r.tool)}</td><td class="num">${n(r.calls)}</td>
+    <td class="num ${r.errors ? "err" : ""}">${n(r.errors)}</td><td class="num">${n(r.prompt_tokens)}</td>
+    <td class="num">${n(r.cached_tokens)}</td><td class="num">${n(r.gen_tokens)}</td><td class="num">${tps(r.tps)}</td><td class="num">${dur(r.avg_ms)}</td></tr>`, "No calls yet.");
+
+  const loaded = Object.fromEntries(d.loaded.map(m => [m.name, m]));
+  const reg = Object.entries(d.registry);
+  // Models Ollama holds in memory that aren't registered still get a row, so they can be unloaded.
+  const extra = d.loaded.filter(l => !reg.some(([, m]) => m.model === l.name))
+    .map(l => [null, { model: l.name, note: "not registered" }]);
+  rows("registry", [...reg, ...extra], ([alias, m], i) => {
+    const l = loaded[m.model], missing = d.ollama_up && !d.installed.includes(m.model);
+    const state = missing ? `<span class="err">not installed</span>`
+      : l ? `in memory · ${(l.size_vram / 1e9).toFixed(1)} GB · unloads ${new Date(l.expires_at).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}` : "idle";
+    const mem = missing ? "" : busy.has(m.model) ? `<button class="link" disabled>${busy.get(m.model)}…</button>`
+      : `<button class="link" data-mem="${l ? "unload" : "load"}" data-model="${esc(m.model)}">${l ? "unload" : "load"}</button>`;
+    const manage = alias === null ? "" : `${i ? `<button class="link" data-act="default" data-alias="${esc(alias)}">make default</button>` : ""}
+          <button class="link danger" data-act="delete" data-alias="${esc(alias)}">remove</button>`;
+    return `<tr><td>${alias === null ? "–" : `<b>${esc(alias)}</b>${i === 0 ? " · default" : ""}`}</td><td>${esc(m.model)}</td>
+      <td>${esc(m.note)}</td><td>${state}</td><td>${mem}${manage}</td></tr>`;
+  }, "No models registered.");
+
+  const sel = $("installed"), keep = sel.value;
+  sel.innerHTML = d.installed.map(m => `<option>${esc(m)}</option>`).join("") || "<option value=''>no Ollama models found</option>";
+  if (d.installed.includes(keep)) sel.value = keep;
+
+  return document.hidden ? 10000 : d.running.length ? 1000 : 4000;
+}
+
+$("registry").addEventListener("click", async e => {
+  const b = e.target.closest("button[data-act], button[data-mem]");
+  if (!b) return;
+  if (b.dataset.act) return post(`/api/models/${encodeURIComponent(b.dataset.alias)}/${b.dataset.act}`);
+  const { mem, model } = b.dataset;
+  busy.set(model, mem === "load" ? "loading" : "unloading");
+  refresh();
+  await post(`/api/ollama/${mem}`, { model });
+  busy.delete(model);
+  refresh();
+});
+$("live").addEventListener("click", e => {
+  const b = e.target.closest("button[data-cancel]");
+  if (!b) return;
+  b.disabled = true; b.textContent = "stopping…";
+  post(`/api/runs/${b.dataset.cancel}/cancel`);
+});
+$("add").addEventListener("submit", e => {
+  e.preventDefault();
+  post("/api/models", Object.fromEntries(new FormData(e.target)));
+  e.target.reset();
+});
+(async function loop() { setTimeout(loop, await refresh()); })();
+</script>
+</body>
+</html>

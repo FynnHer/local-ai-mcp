@@ -1,0 +1,7 @@
+stats.db
+.ollama.lock
+__pycache__/
+.DS_Store
+# your own config, copy from *.example.json
+models.json
+extras.json
