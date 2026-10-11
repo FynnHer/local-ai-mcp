@@ -1,0 +1,12 @@
+{
+  "mcp": {
+    "chrome": {
+      "command": "npx",
+      "args": ["-y", "chrome-devtools-mcp@latest"],
+      "note": "Chrome control and testing: navigate, click, fill forms, screenshots, console, network"
+    }
+  },
+  "skills": {
+    "my-skill": "~/.claude/skills/my-skill"
+  }
+}
