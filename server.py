@@ -8,7 +8,7 @@
 The MCP server starts the dashboard and opens it in the browser on its first tool call
 (set LOCAL_AI_OPEN=0 to disable).
 """
-import fcntl, glob, http.client, json, os, re, shutil, socket, sqlite3, subprocess, sys, tempfile, threading, time, urllib.request
+import fcntl, glob, http.client, json, os, re, shutil, socket, sqlite3, subprocess, sys, tempfile, threading, time, urllib.request, webbrowser
 from urllib.parse import urlsplit
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
@@ -481,7 +481,7 @@ def ensure_dashboard():
         subprocess.Popen([sys.executable, str(HERE / "server.py"), "dashboard"], start_new_session=True,
                          stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
         time.sleep(0.7)
-    subprocess.Popen(["open", f"http://127.0.0.1:{PORT}"])  # ponytail: macOS only, xdg-open on Linux
+    webbrowser.open(f"http://127.0.0.1:{PORT}")
 
 
 _session_busy = threading.Lock()  # one MCP server process = one work-Claude session
