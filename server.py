@@ -67,6 +67,17 @@ def installed():
     return sorted(m["name"] for m in ollama_json("/api/tags")["models"])
 
 
+def context_size(model):
+    """num_ctx the model runs with (set in its Modelfile), or None when Ollama's default applies."""
+    try:
+        with ollama("/api/show", {"model": model}, timeout=5) as r:
+            params = json.load(r).get("parameters", "")
+    except OSError:
+        return None
+    m = re.search(r"^num_ctx\s+(\d+)", params, re.M)
+    return int(m.group(1)) if m else None
+
+
 def db():
     c = sqlite3.connect(DB, timeout=10)
     c.execute("""CREATE TABLE IF NOT EXISTS runs(id INTEGER PRIMARY KEY, ts REAL, tool TEXT, model TEXT,
@@ -320,12 +331,21 @@ def local_delegate(task, cwd, model=None, allow_edits=False):
     mcp, skills = _extras["mcp"], _extras["skills"]
     extra, skill_dirs = skill_prompt(skills)
     cmd += ["--append-system-prompt", WORKER_PROMPT + extra] + [f"--add-dir={d}" for d in skill_dirs]
+    # Claude Code assumes a huge window for models it doesn't know, so its auto-compact would only kick in
+    # after Ollama already overflowed. Tell it the real one; --settings beats ~/.claude-local's env.
+    # Capping file reads keeps one big Read from jumping past the compact threshold in a single turn.
+    ctx = context_size(m)
+    if ctx:
+        cmd += ["--settings", json.dumps({"env": {"CLAUDE_CODE_MAX_CONTEXT_TOKENS": str(ctx),
+                                                  "CLAUDE_CODE_FILE_READ_MAX_OUTPUT_TOKENS": str(min(25000, ctx // 8))}})]
     cfg_path = mcp_config(mcp) if mcp else None
     if cfg_path:
         cmd += [f"--mcp-config={cfg_path}", "--allowedTools=" + ",".join(f"mcp__{n}" for n in mcp)]
     run = Run("delegate", m, task)
     run.live = f"started in {cwd}, tools: {tools}" + (f", mcp: {', '.join(mcp)}" if mcp else "") \
-        + (f", skills: {', '.join(skills)}" if skills else "") + "\n"
+        + (f", skills: {', '.join(skills)}" if skills else "") \
+        + (f"\ncontext {ctx:,} tokens, auto-compact before it fills up\n" if ctx else
+           "\ncontext size unknown (no num_ctx in the Modelfile), auto-compact may come too late\n")
     run.save()
     try:
         run.wait_turn()
@@ -345,6 +365,12 @@ def local_delegate(task, cwd, model=None, allow_edits=False):
             kind = ev.get("type")
             if kind == "system" and ev.get("status") == "requesting":
                 run.set_phase(f"turn {turn + 1}: reading prompt")
+            elif kind == "system" and ev.get("status") == "compacting":
+                run.set_phase("compacting context")
+            elif kind == "system" and ev.get("subtype") == "compact_boundary":
+                pre = (ev.get("compact_metadata") or {}).get("pre_tokens")
+                run.live += f"\n── context compacted{f' at {pre:,} tokens' if pre else ''} ──\n"
+                run.tick()
             elif kind == "stream_event":  # token-level events from --include-partial-messages
                 e = ev.get("event", {})
                 et = e.get("type")

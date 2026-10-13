@@ -216,7 +216,7 @@ Orchestrator mode is optional. Without it, Claude calls the tools when it judges
 A model works well here if it has:
 
 1. **Tool calling.** Look for the *tools* tag on ollama.com. `local_delegate` needs it.
-2. **At least 32k context, ideally 64k.** Claude Code's system prompt and tool definitions alone take ~15–20k tokens. Set `num_ctx` with a Modelfile, as in the quick start.
+2. **64k context (32k at the very least).** Claude Code's own prompt takes several thousand tokens, and auto-compact starts summarizing at about half the window. At 32k that leaves little room for reading files. Set `num_ctx` with a Modelfile, as in the quick start; auto-compact depends on it.
 3. **Room in RAM.** The weights plus the context cache have to fit; keep the weights under ~60–70% of your RAM.
 
 | RAM | Starting point |
@@ -238,6 +238,7 @@ python3 bench.py coding --ask-only   # skip the slower delegate scenarios
 
 - **`local_ask`** streams from Ollama's `/api/chat`, with a 16k-token cap on output to stop runaway generations.
 - **`local_delegate`** starts `claude -p` with `CLAUDE_CONFIG_DIR=~/.claude-local`, with every `ANTHROPIC_*`, `CLAUDE*` and `OTEL_*` variable removed from the environment. The child sees Ollama and nothing else. It only gets the tools it needs, and no MCP servers or skills unless you opt in, because every tool definition is prompt the local model re-reads each turn. The server parses its `stream-json` output to show live progress.
+- **Auto-compact before overflow.** Claude Code assumes a huge context window for models it doesn't know, so its auto-compact would only kick in after Ollama had already overflowed. `local_delegate` reads each model's `num_ctx` from Ollama and passes it in (`CLAUDE_CODE_MAX_CONTEXT_TOKENS` via `--settings`, which beats `~/.claude-local`). Claude Code then summarizes the conversation once it's about half full. File reads are capped at 1/8 of the window, so a single read can't jump past the threshold. A compaction shows up on the live card as `── context compacted at N tokens ──`. This needs `num_ctx` in the Modelfile; without it, the live card warns you.
 - **One model call at a time.** Ollama runs requests one after another anyway. A file lock (`.ollama.lock`) makes the waiting visible: calls from other Claude sessions show up as *queued* and can be stopped.
 - **One call per Claude session.** Claude Code moves slow tool calls to the background, so a second call while one is running gets `REFUSED`. Without this, Claude tends to inspect half-written files or send a duplicate brief.
 - **Everything is logged** to `stats.db`, which is how the dashboard (a separate process) follows along and sends cancel requests.
@@ -258,7 +259,8 @@ python3 bench.py coding --ask-only   # skip the slower delegate scenarios
 | `no models registered` | Fill in `models.json` or add a model in the dashboard |
 | `… is not installed in Ollama` | The name must match `ollama list` exactly, tag included |
 | `local claude failed (exit 1)` | Run `CLAUDE_CONFIG_DIR=~/.claude-local claude -p "hi" --model <model>` yourself and read the error (usually the base URL, or an Ollama that's too old) |
-| The agent forgets the task or stops partway | The context window is too small. Create a `num_ctx` variant |
+| The agent forgets the task or stops partway, or Ollama reports a context overflow | Create a variant with `num_ctx` in its Modelfile (quick start step 2) so auto-compact knows the real window |
+| `Autocompact is thrashing` | The task needs more context than the model has, even after compacting. Split the brief into smaller steps, or use a model with a bigger `num_ctx` |
 | A live card is red and the GPU is busy | The model is looping inside a tool call. Stop it and send a narrower brief |
 | `REFUSED: … still running` | Working as intended. Wait for the first call's result |
 | `can't bind port 8765` | It's already running (`lsof -i :8765`), or set `DASHBOARD_PORT` |
