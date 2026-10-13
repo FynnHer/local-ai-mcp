@@ -80,6 +80,7 @@ def db():
             c.execute(f"ALTER TABLE runs ADD COLUMN {col}")
         except sqlite3.OperationalError:
             pass
+    c.execute("CREATE TABLE IF NOT EXISTS meta(k TEXT PRIMARY KEY, v)")  # session_start: reset from the dashboard
     return c
 
 
@@ -570,19 +571,25 @@ def stats():
     c = db()
     c.row_factory = sqlite3.Row
     q = lambda sql, *a: [dict(r) for r in c.execute(sql, a)]
+    summary = lambda since: q("""SELECT count(*) calls, coalesce(sum(status IN ('error','aborted')),0) errors,
+                         coalesce(sum(prompt_tokens),0) prompt_tokens, coalesce(sum(gen_tokens),0) gen_tokens,
+                         coalesce(sum(cached_tokens),0) cached_tokens,
+                         coalesce(sum(prompt_tokens + gen_tokens),0) total_tokens,
+                         coalesce(sum(total_ms),0) total_ms,
+                         coalesce(sum(gen_tokens)*1000.0/nullif(sum(gen_ms),0),0) tps,
+                         coalesce(sum(ts > strftime('%s','now','-1 day')),0) calls_24h FROM runs WHERE ts >= ?""", since)[0]
+    with c:  # first dashboard start opens the first session
+        c.execute("INSERT OR IGNORE INTO meta VALUES('session_start', ?)", (time.time(),))
+    session_start = c.execute("SELECT v FROM meta WHERE k = 'session_start'").fetchone()[0]
     # Runs whose MCP server died (Claude session closed mid-call) would show as running forever.
     with c:
         for r in q("SELECT DISTINCT pid FROM runs WHERE status = 'running'"):
             if not alive(r["pid"]):
                 c.execute("UPDATE runs SET status = 'aborted' WHERE status = 'running' AND pid = ?", (r["pid"],))
     out = {
-        "summary": q(f"""SELECT count(*) calls, coalesce(sum(status IN ('error','aborted')),0) errors,
-                         coalesce(sum(prompt_tokens),0) prompt_tokens, coalesce(sum(gen_tokens),0) gen_tokens,
-                         coalesce(sum(cached_tokens),0) cached_tokens,
-                         coalesce(sum(prompt_tokens + gen_tokens),0) total_tokens,
-                         coalesce(sum(total_ms),0) total_ms,
-                         coalesce(sum(gen_tokens)*1000.0/nullif(sum(gen_ms),0),0) tps,
-                         coalesce(sum(ts > strftime('%s','now','-1 day')),0) calls_24h FROM runs""")[0],
+        "summary": summary(0),
+        "session": summary(session_start),
+        "session_start": session_start,
         "per_model": q(f"""SELECT model, tool, count(*) calls, sum(status IN ('error','aborted')) errors,
                            sum(prompt_tokens) prompt_tokens, sum(cached_tokens) cached_tokens, sum(gen_tokens) gen_tokens,
                            sum(gen_tokens)*1000.0/nullif(sum(gen_ms),0) tps, avg(total_ms) avg_ms
@@ -675,6 +682,12 @@ class Dashboard(BaseHTTPRequestHandler):
                                 (int(m.group(1)),)).rowcount
             c.close()
             return self.reply(200, {"ok": True}) if hit else self.reply(409, {"error": "that call isn't running"})
+        if self.path == "/api/session/reset":
+            c = db()
+            with c:
+                c.execute("INSERT OR REPLACE INTO meta VALUES('session_start', ?)", (time.time(),))
+            c.close()
+            return self.reply(200, {"ok": True})
         if m := re.fullmatch(r"/api/ollama/(load|unload)", self.path):
             model = str(body.get("model", ""))
             try:

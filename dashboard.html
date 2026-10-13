@@ -24,7 +24,8 @@
   .status { color: var(--muted); font-size: 13px; }
   .dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; margin-right: 6px; background: var(--bad); }
   .dot.up { background: var(--ok); }
-  .tiles { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 10px; margin-top: 18px; }
+  h2 .actions { float: right; text-transform: none; letter-spacing: 0; font-weight: 400; }
+  .tiles { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 10px; }
   .tile { background: var(--panel); border: 1px solid var(--line); border-radius: 8px; padding: 12px 14px; }
   .tile b { display: block; font-size: 22px; font-variant-numeric: tabular-nums; }
   .tile span { color: var(--muted); font-size: 12px; }
@@ -82,6 +83,11 @@
     <div class="status"><span id="dot" class="dot"></span><span id="status">connecting…</span></div>
   </header>
 
+  <h2>This session <span class="actions"><span id="session-since"></span>
+    <button class="link" id="reset-session">reset session</button></span></h2>
+  <div class="tiles" id="session-tiles"></div>
+
+  <h2>All time</h2>
   <div class="tiles" id="tiles"></div>
 
   <section id="live-section" hidden>
@@ -89,7 +95,7 @@
     <div id="live"></div>
   </section>
 
-  <h2>Recent calls</h2>
+  <h2>Recent calls <span class="actions"><button class="link" id="collapse-all" hidden>collapse all</button></span></h2>
   <div class="panel"><table>
     <thead><tr><th>When</th><th>Tool</th><th>Model</th><th class="num">Input</th><th class="num">Cached</th><th class="num">Output</th>
       <th class="num">tok/s</th><th class="num">Time</th><th>Task (click to expand)</th></tr></thead>
@@ -127,7 +133,7 @@ const ago = ts => { const s = Date.now() / 1000 - ts;
 const rows = (el, list, cols, emptyText) => { $(el).innerHTML = list.length
   ? list.map(cols).join("") : `<tr><td class="empty" colspan="10">${emptyText}</td></tr>`; };
 
-const openRuns = new Set(), detailCache = {}, busy = new Map();
+const openRuns = new Set(), openPrompts = new Set(), detailCache = {}, busy = new Map();
 
 async function post(path, body) {
   const r = await fetch(path, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body || {}) });
@@ -190,14 +196,23 @@ function renderRecent(recent) {
     if (openRuns.has(r.id)) {
       const d = detailCache[r.id];
       html += `<tr class="detail"><td colspan="9">${d
-        ? `<div class="label">Prompt</div><pre>${esc(d.prompt)}</pre><div class="label">Output</div><pre>${esc(d.live) || "(empty)"}</pre>`
+        ? `<details data-prompt="${r.id}"${openPrompts.has(r.id) ? " open" : ""}><summary>Prompt (${n(d.prompt.length)} chars)</summary>
+             <pre>${esc(d.prompt)}</pre></details><div class="label">Output</div><pre>${esc(d.live) || "(empty)"}</pre>`
         : "loading…"}</td></tr>`;
     }
     return html;
   }, "No calls yet.");
+  $("collapse-all").hidden = !openRuns.size;
 }
 
 let lastRecent = [];
+// toggle doesn't bubble, so listen in the capture phase
+$("recent").addEventListener("toggle", e => {
+  const id = Number(e.target.dataset.prompt);
+  if (id) e.target.open ? openPrompts.add(id) : openPrompts.delete(id);
+}, true);
+$("collapse-all").addEventListener("click", () => { openRuns.clear(); openPrompts.clear(); renderRecent(lastRecent); });
+$("reset-session").addEventListener("click", () => post("/api/session/reset"));
 $("recent").addEventListener("click", async e => {
   const tr = e.target.closest("tr[data-run]");
   if (!tr) return;
@@ -220,13 +235,15 @@ async function refresh() {
        d.queued && `${d.queued} queued`, d.gpu != null && `GPU ${d.gpu}%`].filter(Boolean).join(" · ")
     : "Ollama not reachable";
 
-  const s = d.summary;
-  $("tiles").innerHTML = [
+  const tiles = (el, s, extra = []) => $(el).innerHTML = [
     [n(s.total_tokens), "total tokens"], [n(s.prompt_tokens), "input tokens"], [n(s.gen_tokens), "output tokens"],
     [n(s.cached_tokens), `cached tokens · ${s.prompt_tokens ? Math.round(s.cached_tokens / s.prompt_tokens * 100) : 0}% of input`],
-    [n(s.calls), "calls total"], [n(s.calls_24h), "calls, last 24 h"], [tps(s.tps), "avg output tok/s"],
+    [n(s.calls), "calls"], ...extra, [tps(s.tps), "avg output tok/s"],
     [dur(s.total_ms), "total run time"], [n(s.errors), "errors"],
   ].map(([v, l]) => `<div class="tile"><b>${v}</b><span>${l}</span></div>`).join("");
+  tiles("session-tiles", d.session);
+  tiles("tiles", d.summary, [[n(d.summary.calls_24h), "calls, last 24 h"]]);
+  $("session-since").textContent = `started ${ago(d.session_start)} ·`;
 
   renderLive(d.running, d.now, d.gpu);
   lastRecent = d.recent;
