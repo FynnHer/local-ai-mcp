@@ -51,7 +51,7 @@ If that model isn't available or is too big for you, pick any model on ollama.co
 ## 3. Get the code
 
 ```bash
-git clone <this repo> ~/local-ai-mcp     # or unzip the folder to ~/local-ai-mcp
+git clone https://github.com/FynnHer/local-ai-mcp.git ~/local-ai-mcp
 cd ~/local-ai-mcp
 ```
 

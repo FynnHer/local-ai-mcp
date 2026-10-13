@@ -95,7 +95,7 @@ Times out after 30 minutes.
 
 ```bash
 # 1. Get the code
-git clone https://github.com/<you>/local-ai-mcp ~/local-ai-mcp
+git clone https://github.com/FynnHer/local-ai-mcp.git ~/local-ai-mcp
 cd ~/local-ai-mcp
 
 # 2. Pull a model that supports tool calling, and give it a 64k context
